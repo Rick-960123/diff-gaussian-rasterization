@@ -70,6 +70,65 @@ __device__ glm::vec3 computeColorFromSH(int idx, int tidx, int deg, int max_coef
 	return glm::max(result, 0.0f);
 }
 
+__forceinline__ __device__ glm::vec3 interp(glm::vec3* a, glm::vec3* b, int i, float t)
+{
+	return t * a[i] + (1.0f - t) * b[i];
+}
+
+__device__ glm::vec3 computeColorFromSHInterp(int idx, int p_idx, int tidx, float t, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, bool* clamped)
+{
+	// The implementation is loosely based on code for 
+	// "Differentiable Point-Based Radiance Fields for 
+	// Efficient View Synthesis" by Zhang et al. (2022)
+	glm::vec3 pos = means[idx];
+	glm::vec3 dir = pos - campos;
+	dir = dir / glm::length(dir);
+
+	glm::vec3* sh = ((glm::vec3*)shs) + idx * max_coeffs;
+	glm::vec3* sh_ = ((glm::vec3*)shs) + p_idx * max_coeffs;
+	glm::vec3 result = SH_C0 * interp(sh, sh_, 0, t);
+
+	if (deg > 0)
+	{
+		float x = dir.x;
+		float y = dir.y;
+		float z = dir.z;
+		result = result - SH_C1 * y * interp(sh, sh_, 1, t) + SH_C1 * z * interp(sh, sh_, 2, t) - SH_C1 * x * interp(sh, sh_, 3, t);
+
+		if (deg > 1)
+		{
+			float xx = x * x, yy = y * y, zz = z * z;
+			float xy = x * y, yz = y * z, xz = x * z;
+			result = result +
+				SH_C2[0] * xy * interp(sh, sh_, 4, t) +
+				SH_C2[1] * yz * interp(sh, sh_, 5, t) +
+				SH_C2[2] * (2.0f * zz - xx - yy) * interp(sh, sh_, 6, t) +
+				SH_C2[3] * xz * interp(sh, sh_, 7, t) +
+				SH_C2[4] * (xx - yy) * interp(sh, sh_, 8, t);
+
+			if (deg > 2)
+			{
+				result = result +
+					SH_C3[0] * y * (3.0f * xx - yy) * interp(sh, sh_, 9, t) +
+					SH_C3[1] * xy * z * interp(sh, sh_, 10, t) +
+					SH_C3[2] * y * (4.0f * zz - xx - yy) * interp(sh, sh_, 11, t) +
+					SH_C3[3] * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * interp(sh, sh_, 12, t) +
+					SH_C3[4] * x * (4.0f * zz - xx - yy) * interp(sh, sh_, 13, t) +
+					SH_C3[5] * z * (xx - yy) * interp(sh, sh_, 14, t) +
+					SH_C3[6] * x * (xx - 3.0f * yy) * interp(sh, sh_, 15, t);
+			}
+		}
+	}
+	result += 0.5f;
+
+	// RGB colors are clamped to positive values. If values are
+	// clamped, we need to keep track of this for the backward pass.
+	clamped[3 * tidx + 0] = (result.x < 0);
+	clamped[3 * tidx + 1] = (result.y < 0);
+	clamped[3 * tidx + 2] = (result.z < 0);
+	return glm::max(result, 0.0f);
+}
+
 // Forward version of 2D covariance matrix computation
 __device__ float3 computeCov2D(const float3& mean, float focal_x, float focal_y, float tan_fovx, float tan_fovy, const float* cov3D, const float* viewmatrix)
 {
@@ -326,11 +385,14 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// spherical harmonics coefficients to RGB color.
 	if (colors_precomp == nullptr)
 	{
-		glm::vec3 result = computeColorFromSH(r_idx, t_idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped);
-
-		if (parent_indices != nullptr)
+		glm::vec3 result;
+		if (parent_indices == nullptr)
 		{
-			result = t * result + (1.0f - t) * computeColorFromSH(p_idx, t_idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped_p);
+			result = computeColorFromSH(r_idx, t_idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped);
+		}
+		else
+		{
+			result = computeColorFromSHInterp(r_idx, p_idx, t_idx, t, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped_p);
 		}
 
 		rgb[t_idx * C + 0] = result.x;
