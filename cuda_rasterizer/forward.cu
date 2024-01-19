@@ -239,13 +239,23 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	bool prefiltered,
 	int2* rects,
 	float3 boxmin,
-	float3 boxmax)
+	float3 boxmax,
+	int skyboxnum)
 {
 	auto t_idx = cg::this_grid().thread_rank();
 	if (t_idx >= P)
 		return;
 
-	int r_idx = indices == nullptr ? t_idx : indices[t_idx];
+	int r_idx;
+	if (t_idx < (P - skyboxnum))
+	{
+		r_idx = indices == nullptr ? t_idx : indices[t_idx];
+	}
+	else
+	{
+		r_idx = -(t_idx - (P - skyboxnum)) - 1;
+		parent_indices = nullptr; //Sky has no parents
+	}
 
 	// Initialize radius and touched tiles to 0. If this isn't changed,
 	// this Gaussian will not be processed further.
@@ -435,7 +445,8 @@ renderCUDA(
 	float* __restrict__ final_T,
 	uint32_t* __restrict__ n_contrib,
 	const float* __restrict__ bg_color,
-	float* __restrict__ out_color)
+	float* __restrict__ out_color,
+	int P, int skyboxnum)
 {
 	// Identify current tile and associated min/max pixel range.
 	auto block = cg::this_thread_block();
@@ -507,10 +518,11 @@ renderCUDA(
 			// Avoid numerical instabilities (see paper appendix). 
 			float my_alpha = min(0.99f, con_o.w * exp(power));
 			float alpha;
-			if (ts != nullptr && kids != nullptr)
+			int coll_id = collected_id[j];
+			if (coll_id < (P - skyboxnum) && ts != nullptr && kids != nullptr)
 			{
-				float kidsqrt_alpha = 1.0f - pow(1.0f - my_alpha, 1.0f / kids[collected_id[j]]);
-				float t = ts[collected_id[j]];
+				float kidsqrt_alpha = 1.0f - pow(1.0f - my_alpha, 1.0f / kids[coll_id]);
+				float t = ts[coll_id];
 				alpha = t * my_alpha + (1.0f - t) * kidsqrt_alpha;
 			}
 			else
@@ -529,7 +541,7 @@ renderCUDA(
 
 			// Eq. (3) from 3D Gaussian splatting paper.
 			for (int ch = 0; ch < CHANNELS; ch++)
-				C[ch] += features[collected_id[j] * CHANNELS + ch] * alpha * T;
+				C[ch] += features[coll_id * CHANNELS + ch] * alpha * T;
 
 			T = test_T;
 
@@ -563,7 +575,9 @@ void FORWARD::render(
 	float* final_T,
 	uint32_t* n_contrib,
 	const float* bg_color,
-	float* out_color)
+	float* out_color,
+	int P,
+	int skyboxnum)
 {
 	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
 		ranges,
@@ -577,7 +591,9 @@ void FORWARD::render(
 		final_T,
 		n_contrib,
 		bg_color,
-		out_color);
+		out_color,
+		P,
+		skyboxnum);
 }
 
 void FORWARD::preprocess(int P, int D, int M,
@@ -611,7 +627,8 @@ void FORWARD::preprocess(int P, int D, int M,
 	bool prefiltered,
 	int2* rects,
 	float3 boxmin,
-	float3 boxmax)
+	float3 boxmax,
+	int skyboxnum)
 {
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
 		P, D, M,
@@ -645,6 +662,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		prefiltered,
 		rects,
 		boxmin,
-		boxmax
+		boxmax,
+		skyboxnum
 		);
 }

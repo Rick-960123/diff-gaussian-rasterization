@@ -52,7 +52,8 @@ namespace FORWARD
 		bool prefiltered,
 		int2* rects,
 		float3 boxmin,
-		float3 boxmax);
+		float3 boxmax,
+		int skyboxnum);
 
 	// Main rasterization method.
 	void render(
@@ -68,7 +69,9 @@ namespace FORWARD
 		float* final_T,
 		uint32_t* n_contrib,
 		const float* bg_color,
-		float* out_color);
+		float* out_color,
+		int P,
+		int skyboxnum);
 }
 
 

@@ -229,7 +229,8 @@ int CudaRasterizer::Rasterizer::forward(
 	int* rects,
 	float* boxmin,
 	float* boxmax,
-	bool debug)
+	bool debug,
+	int skyboxnum)
 {
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
@@ -296,7 +297,8 @@ int CudaRasterizer::Rasterizer::forward(
 		prefiltered,
 		(int2*)rects,
 		minn,
-		maxx
+		maxx,
+		skyboxnum
 	), debug);
 
 	// Compute prefix sum over full list of touched tile counts by Gaussians
@@ -366,7 +368,9 @@ int CudaRasterizer::Rasterizer::forward(
 		imgState.accum_alpha,
 		imgState.n_contrib,
 		background,
-		out_color), debug);
+		out_color,
+		P,
+		skyboxnum), debug);
 
 	return num_rendered;
 }

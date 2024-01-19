@@ -57,7 +57,8 @@ namespace CudaRasterizer
 			int* rects = nullptr,
 			float* boxmin = nullptr,
 			float* boxmax = nullptr,
-			bool debug = false);
+			bool debug = false,
+			int skyboxnum = 0);
 
 		static void backward(
 			const int P, int D, int M, int R,
