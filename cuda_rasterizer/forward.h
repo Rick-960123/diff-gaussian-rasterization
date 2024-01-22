@@ -53,7 +53,8 @@ namespace FORWARD
 		int2* rects,
 		float3 boxmin,
 		float3 boxmax,
-		int skyboxnum);
+		int skyboxnum,
+		cudaStream_t stream);
 
 	// Main rasterization method.
 	void render(
@@ -71,7 +72,8 @@ namespace FORWARD
 		const float* bg_color,
 		float* out_color,
 		int P,
-		int skyboxnum);
+		int skyboxnum,
+		cudaStream_t stream);
 }
 
 

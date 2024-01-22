@@ -471,6 +471,7 @@ renderCUDA(
 	__shared__ int collected_id[BLOCK_SIZE];
 	__shared__ float2 collected_xy[BLOCK_SIZE];
 	__shared__ float4 collected_conic_opacity[BLOCK_SIZE];
+	__shared__ float2 collected_interp[BLOCK_SIZE];
 
 	// Initialize helper variables
 	float T = 1.0f;
@@ -479,6 +480,9 @@ renderCUDA(
 	float C[CHANNELS] = { 0 };
 
 	// Iterate over batches until all done or range is complete
+	int check = (P - skyboxnum);
+	bool do_interp = (ts != nullptr && kids != nullptr);
+
 	for (int i = 0; i < rounds; i++, toDo -= BLOCK_SIZE)
 	{
 		// End if entire block votes that it is done rasterizing
@@ -494,6 +498,8 @@ renderCUDA(
 			collected_id[block.thread_rank()] = coll_id;
 			collected_xy[block.thread_rank()] = points_xy_image[coll_id];
 			collected_conic_opacity[block.thread_rank()] = conic_opacity[coll_id];
+			if(coll_id < (P - skyboxnum) && ts != nullptr && kids != nullptr)
+			  collected_interp[block.thread_rank()] = { ts[coll_id], 1.0f / (float)kids[coll_id] };
 		}
 		block.sync();
 
@@ -519,11 +525,11 @@ renderCUDA(
 			float my_alpha = min(0.99f, con_o.w * exp(power));
 			float alpha;
 			int coll_id = collected_id[j];
-			if (coll_id < (P - skyboxnum) && ts != nullptr && kids != nullptr)
+			if (do_interp && coll_id < check)
 			{
-				float kidsqrt_alpha = 1.0f - __powf(1.0f - my_alpha, 1.0f / kids[coll_id]);
-				float t = ts[coll_id];
-				alpha = t * my_alpha + (1.0f - t) * kidsqrt_alpha;
+				float2 interp = collected_interp[j];
+				float kidsqrt_alpha = 1.0f - __powf(1.0f - my_alpha, interp.y);
+				alpha = interp.x * my_alpha + (1.0f - interp.x) * kidsqrt_alpha;
 			}
 			else
 			{
@@ -577,9 +583,10 @@ void FORWARD::render(
 	const float* bg_color,
 	float* out_color,
 	int P,
-	int skyboxnum)
+	int skyboxnum,
+	cudaStream_t stream)
 {
-	renderCUDA<NUM_CHANNELS> << <grid, block >> > (
+	renderCUDA<NUM_CHANNELS> << <grid, block, 0, stream >> > (
 		ranges,
 		point_list,
 		W, H,
@@ -628,9 +635,10 @@ void FORWARD::preprocess(int P, int D, int M,
 	int2* rects,
 	float3 boxmin,
 	float3 boxmax,
-	int skyboxnum)
+	int skyboxnum,
+	cudaStream_t stream)
 {
-	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256 >> > (
+	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256, 0, stream >> > (
 		P, D, M,
 		indices,
 		parent_indices,

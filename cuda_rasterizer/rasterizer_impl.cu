@@ -230,8 +230,10 @@ int CudaRasterizer::Rasterizer::forward(
 	float* boxmin,
 	float* boxmax,
 	bool debug,
-	int skyboxnum)
+	int skyboxnum,
+	void* streamy)
 {
+	cudaStream_t stream = (cudaStream_t)streamy;
 	const float focal_y = height / (2.0f * tan_fovy);
 	const float focal_x = width / (2.0f * tan_fovx);
 
@@ -298,17 +300,19 @@ int CudaRasterizer::Rasterizer::forward(
 		(int2*)rects,
 		minn,
 		maxx,
-		skyboxnum
+		skyboxnum,
+		stream
 	), debug);
 
 	// Compute prefix sum over full list of touched tile counts by Gaussians
 	// E.g., [2, 3, 0, 2, 1] -> [2, 5, 5, 7, 8]
-	CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, geomState.tiles_touched, geomState.point_offsets, P), debug)
+	CHECK_CUDA(cub::DeviceScan::InclusiveSum(geomState.scanning_space, geomState.scan_size, geomState.tiles_touched, geomState.point_offsets, P, stream), debug)
 
 
 	// Retrieve total number of Gaussian instances to launch and resize aux buffers
 	int num_rendered;
-	CHECK_CUDA(cudaMemcpy(&num_rendered, geomState.point_offsets + P - 1, sizeof(int), cudaMemcpyDeviceToHost), debug);
+	CHECK_CUDA(cudaMemcpyAsync(&num_rendered, geomState.point_offsets + P - 1, sizeof(int), cudaMemcpyDeviceToHost, stream), debug);
+	cudaStreamSynchronize(stream);
 
 	if (num_rendered == 0)
 		return 0;
@@ -319,7 +323,7 @@ int CudaRasterizer::Rasterizer::forward(
 
 	// For each instance to be rendered, produce adequate [ tile | depth ] key 
 	// and corresponding dublicated Gaussian indices to be sorted
-	duplicateWithKeys << <(P + 255) / 256, 256 >> > (
+	duplicateWithKeys << <(P + 255) / 256, 256, 0, stream >> > (
 		P,
 		geomState.means2D,
 		geomState.depths,
@@ -340,13 +344,13 @@ int CudaRasterizer::Rasterizer::forward(
 		binningState.sorting_size,
 		binningState.point_list_keys_unsorted, binningState.point_list_keys,
 		binningState.point_list_unsorted, binningState.point_list,
-		num_rendered, 0, 32 + bit), debug);
+		num_rendered, 0, 32 + bit, stream), debug);
 
-	CHECK_CUDA(cudaMemset(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2)), debug);
+	CHECK_CUDA(cudaMemsetAsync(imgState.ranges, 0, tile_grid.x * tile_grid.y * sizeof(uint2), stream), debug);
 
 	// Identify start and end of per-tile workloads in sorted list
 	if (num_rendered > 0)
-		 identifyTileRanges << <(num_rendered + 255) / 256, 256 >> > (
+		 identifyTileRanges << <(num_rendered + 255) / 256, 256, 0, stream >> > (
 			num_rendered,
 			binningState.point_list_keys,
 			imgState.ranges);
@@ -370,7 +374,8 @@ int CudaRasterizer::Rasterizer::forward(
 		background,
 		out_color,
 		P,
-		skyboxnum), debug);
+		skyboxnum,
+		stream), debug);
 
 	return num_rendered;
 }
