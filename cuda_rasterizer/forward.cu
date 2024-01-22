@@ -521,7 +521,7 @@ renderCUDA(
 			int coll_id = collected_id[j];
 			if (coll_id < (P - skyboxnum) && ts != nullptr && kids != nullptr)
 			{
-				float kidsqrt_alpha = 1.0f - pow(1.0f - my_alpha, 1.0f / kids[coll_id]);
+				float kidsqrt_alpha = 1.0f - __powf(1.0f - my_alpha, 1.0f / kids[coll_id]);
 				float t = ts[coll_id];
 				alpha = t * my_alpha + (1.0f - t) * kidsqrt_alpha;
 			}
