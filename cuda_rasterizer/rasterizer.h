@@ -59,7 +59,8 @@ namespace CudaRasterizer
 			float* boxmax = nullptr,
 			bool debug = false,
 			int skyboxnum = 0,
-			void* stream = 0);
+			void* stream = 0,
+			int* num_rendered = nullptr);
 
 		static void backward(
 			const int P, int D, int M, int R,
