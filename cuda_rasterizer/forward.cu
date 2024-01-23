@@ -229,7 +229,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	MatMat viewmat,
 	MatMat projmat,
 	const float* colors_precomp,
-	const glm::vec3* cam_pos,
+	const glm::vec3 cam_pos,
 	const int W, int H,
 	const float tan_fovx, float tan_fovy,
 	const float focal_x, float focal_y,
@@ -403,11 +403,11 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		glm::vec3 result;
 		if (parent_indices == nullptr)
 		{
-			result = computeColorFromSH(r_idx, t_idx, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped);
+			result = computeColorFromSH(r_idx, t_idx, D, M, (glm::vec3*)orig_points, cam_pos, shs, clamped);
 		}
 		else
 		{
-			result = computeColorFromSHInterp(r_idx, p_idx, t_idx, t, D, M, (glm::vec3*)orig_points, *cam_pos, shs, clamped_p);
+			result = computeColorFromSHInterp(r_idx, p_idx, t_idx, t, D, M, (glm::vec3*)orig_points, cam_pos, shs, clamped_p);
 		}
 
 		rgb[t_idx * C + 0] = result.x;
@@ -669,7 +669,7 @@ void FORWARD::preprocess(int P, int D, int M,
 		viewview,
 		projproj,
 		colors_precomp,
-		cam_pos,
+		*cam_pos,
 		W, H,
 		tan_fovx, tan_fovy,
 		focal_x, focal_y,
