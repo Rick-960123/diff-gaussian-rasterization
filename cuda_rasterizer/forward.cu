@@ -15,6 +15,11 @@
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
 
+struct MatMat
+{
+	float vals[16];
+};
+
 // Forward method for converting the input spherical harmonics
 // coefficients of each Gaussian to a simple RGB color.
 __device__ glm::vec3 computeColorFromSH(int idx, int tidx, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, bool* clamped)
@@ -221,9 +226,9 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	bool* clamped,
 	bool* clamped_p,
 	const float* cov3D_precomp,
+	MatMat viewmat,
+	MatMat projmat,
 	const float* colors_precomp,
-	const float* viewmatrix,
-	const float* projmatrix,
 	const glm::vec3* cam_pos,
 	const int W, int H,
 	const float tan_fovx, float tan_fovy,
@@ -289,10 +294,10 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 
 	// Bring points to screen space
-	float4 p_hom = transformPoint4x4(p_orig, projmatrix);
+	float4 p_hom = transformPoint4x4(p_orig, projmat.vals);
 	float p_w = 1.0f / (p_hom.w + 0.0000001f);
 	float3 p_proj = { p_hom.x * p_w, p_hom.y * p_w, p_hom.z * p_w };
-	float3 p_view = transformPoint4x3(p_orig, viewmatrix);
+	float3 p_view = transformPoint4x3(p_orig, viewmat.vals);
 
 	if (p_view.z <= 0.2f)
 		return;
@@ -345,7 +350,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	}
 
 	// Compute 2D screen-space covariance matrix
-	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix);
+	float3 cov = computeCov2D(p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmat.vals);
 
 	constexpr float h_var = 0.3f;
 	const float det_cov = cov.x * cov.z - cov.y * cov.y;
@@ -603,6 +608,8 @@ void FORWARD::render(
 		skyboxnum);
 }
 
+
+
 void FORWARD::preprocess(int P, int D, int M,
 	const int* indices,
 	const int* parent_indices,
@@ -638,6 +645,13 @@ void FORWARD::preprocess(int P, int D, int M,
 	int skyboxnum,
 	cudaStream_t stream)
 {
+	MatMat viewview, projproj;
+	for (int i = 0; i < 16; i++)
+	{
+		viewview.vals[i] = viewmatrix[i];
+		projproj.vals[i] = projmatrix[i];
+	}
+
 	preprocessCUDA<NUM_CHANNELS> << <(P + 255) / 256, 256, 0, stream >> > (
 		P, D, M,
 		indices,
@@ -652,9 +666,9 @@ void FORWARD::preprocess(int P, int D, int M,
 		clamped,
 		p_clamped,
 		cov3D_precomp,
+		viewview,
+		projproj,
 		colors_precomp,
-		viewmatrix, 
-		projmatrix,
 		cam_pos,
 		W, H,
 		tan_fovx, tan_fovy,
