@@ -232,7 +232,9 @@ int CudaRasterizer::Rasterizer::forward(
 	bool debug,
 	int skyboxnum,
 	void* streamy,
-	int* num_rendered)
+	int* num_rendered,
+	bool compressed,
+	float biglimit)
 {
 	cudaStream_t stream = (cudaStream_t)streamy;
 	const float focal_y = height / (2.0f * tan_fovy);
@@ -303,7 +305,9 @@ int CudaRasterizer::Rasterizer::forward(
 		minn,
 		maxx,
 		skyboxnum,
-		stream
+		stream,
+		compressed,
+		biglimit
 	), debug);
 
 	// Compute prefix sum over full list of touched tile counts by Gaussians

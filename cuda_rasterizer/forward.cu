@@ -11,6 +11,7 @@
 
 #include "forward.h"
 #include "auxiliary.h"
+#include <cuda_fp16.h>
 #include <cooperative_groups.h>
 #include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
@@ -75,12 +76,27 @@ __device__ glm::vec3 computeColorFromSH(int idx, int tidx, int deg, int max_coef
 	return glm::max(result, 0.0f);
 }
 
-__forceinline__ __device__ glm::vec3 interp(glm::vec3* a, glm::vec3* b, int i, float t)
+__forceinline__ __device__ glm::vec3 interp(glm::vec3* a, glm::vec3* b, int i, float t, bool c)
 {
-	return t * a[i] + (1.0f - t) * b[i];
+	glm::vec3 arr = a[i];
+	glm::vec3 brr;
+	if (c)
+	{
+		for (int j = 0; j < 3; j++)
+		{
+			__half2 d = *((__half2*)&arr[j]);
+			arr[j] = __half2float(d.x);
+			brr[j] = __half2float(d.y);
+		}
+	}
+	else
+	{
+		brr = b[i];	
+	}
+	return t * arr + (1.0f - t) * brr;
 }
 
-__device__ glm::vec3 computeColorFromSHInterp(int idx, int p_idx, int tidx, float t, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, bool* clamped)
+__device__ glm::vec3 computeColorFromSHInterp(int idx, int p_idx, int tidx, float t, int deg, int max_coeffs, const glm::vec3* means, glm::vec3 campos, const float* shs, bool* clamped, bool c)
 {
 	// The implementation is loosely based on code for 
 	// "Differentiable Point-Based Radiance Fields for 
@@ -91,36 +107,36 @@ __device__ glm::vec3 computeColorFromSHInterp(int idx, int p_idx, int tidx, floa
 
 	glm::vec3* sh = ((glm::vec3*)shs) + idx * max_coeffs;
 	glm::vec3* sh_ = ((glm::vec3*)shs) + p_idx * max_coeffs;
-	glm::vec3 result = SH_C0 * interp(sh, sh_, 0, t);
+	glm::vec3 result = SH_C0 * interp(sh, sh_, 0, t, c);
 
 	if (deg > 0)
 	{
 		float x = dir.x;
 		float y = dir.y;
 		float z = dir.z;
-		result = result - SH_C1 * y * interp(sh, sh_, 1, t) + SH_C1 * z * interp(sh, sh_, 2, t) - SH_C1 * x * interp(sh, sh_, 3, t);
+		result = result - SH_C1 * y * interp(sh, sh_, 1, t, c) + SH_C1 * z * interp(sh, sh_, 2, t, c) - SH_C1 * x * interp(sh, sh_, 3, t, c);
 
 		if (deg > 1)
 		{
 			float xx = x * x, yy = y * y, zz = z * z;
 			float xy = x * y, yz = y * z, xz = x * z;
 			result = result +
-				SH_C2[0] * xy * interp(sh, sh_, 4, t) +
-				SH_C2[1] * yz * interp(sh, sh_, 5, t) +
-				SH_C2[2] * (2.0f * zz - xx - yy) * interp(sh, sh_, 6, t) +
-				SH_C2[3] * xz * interp(sh, sh_, 7, t) +
-				SH_C2[4] * (xx - yy) * interp(sh, sh_, 8, t);
+				SH_C2[0] * xy * interp(sh, sh_, 4, t, c) +
+				SH_C2[1] * yz * interp(sh, sh_, 5, t, c) +
+				SH_C2[2] * (2.0f * zz - xx - yy) * interp(sh, sh_, 6, t, c) +
+				SH_C2[3] * xz * interp(sh, sh_, 7, t, c) +
+				SH_C2[4] * (xx - yy) * interp(sh, sh_, 8, t, c);
 
 			if (deg > 2)
 			{
 				result = result +
-					SH_C3[0] * y * (3.0f * xx - yy) * interp(sh, sh_, 9, t) +
-					SH_C3[1] * xy * z * interp(sh, sh_, 10, t) +
-					SH_C3[2] * y * (4.0f * zz - xx - yy) * interp(sh, sh_, 11, t) +
-					SH_C3[3] * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * interp(sh, sh_, 12, t) +
-					SH_C3[4] * x * (4.0f * zz - xx - yy) * interp(sh, sh_, 13, t) +
-					SH_C3[5] * z * (xx - yy) * interp(sh, sh_, 14, t) +
-					SH_C3[6] * x * (xx - 3.0f * yy) * interp(sh, sh_, 15, t);
+					SH_C3[0] * y * (3.0f * xx - yy) * interp(sh, sh_, 9, t, c) +
+					SH_C3[1] * xy * z * interp(sh, sh_, 10, t, c) +
+					SH_C3[2] * y * (4.0f * zz - xx - yy) * interp(sh, sh_, 11, t, c) +
+					SH_C3[3] * z * (2.0f * zz - 3.0f * xx - 3.0f * yy) * interp(sh, sh_, 12, t, c) +
+					SH_C3[4] * x * (4.0f * zz - xx - yy) * interp(sh, sh_, 13, t, c) +
+					SH_C3[5] * z * (xx - yy) * interp(sh, sh_, 14, t, c) +
+					SH_C3[6] * x * (xx - 3.0f * yy) * interp(sh, sh_, 15, t, c);
 			}
 		}
 	}
@@ -245,21 +261,24 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	int2* rects,
 	float3 boxmin,
 	float3 boxmax,
-	int skyboxnum)
+	int skyboxnum,
+	bool compressed,
+	float biglimit)
 {
 	auto t_idx = cg::this_grid().thread_rank();
 	if (t_idx >= P)
 		return;
 
+	bool sky = t_idx >= (P - skyboxnum);
 	int r_idx;
-	if (t_idx < (P - skyboxnum))
-	{
-		r_idx = indices == nullptr ? t_idx : indices[t_idx];
-	}
-	else
+	if (sky)
 	{
 		r_idx = -(t_idx - (P - skyboxnum)) - 1;
 		parent_indices = nullptr; //Sky has no parents
+	}
+	else
+	{
+		r_idx = indices == nullptr ? t_idx : indices[t_idx];
 	}
 
 	// Initialize radius and touched tiles to 0. If this isn't changed,
@@ -308,6 +327,8 @@ __global__ void preprocessCUDA(int P, int D, int M,
 
 	// If 3D covariance matrix is precomputed, use it, otherwise compute
 	// from scaling and rotation parameters. 
+
+	__half2 d;
 	float* cov3D;
 	if (cov3D_precomp != nullptr)
 	{
@@ -331,12 +352,36 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		//	}
 		//}
 
+
 		glm::vec3 scale = scales[r_idx];
 		glm::vec4 rot = rotations[r_idx];
 		if (parent_indices != nullptr)
 		{
-			scale = t * scale + (1.0f - t) * scales[p_idx];
-			glm::vec4 otherrot = rotations[p_idx];
+			glm::vec3 parentscale;
+			glm::vec4 otherrot;
+			if (compressed)
+			{
+				for (int i = 0; i < 3; i++)
+				{
+					d = *((__half2*)&scale[i]);
+					scale[i] = __half2float(d.x);
+					parentscale[i] = __half2float(d.y);
+				}
+				//for (int i = 0; i < 4; i++)
+				//{
+				//	d = *((__half2*)&rot[i]);
+				//	rot[i] = __half2float(d.x);
+				//	otherrot[i] = __half2float(d.y);
+				//}
+			}
+			else
+			{
+				parentscale = scales[p_idx];
+			}
+			otherrot = rotations[p_idx];
+			compressed = false;
+
+			scale = t * scale + (1.0f - t) * parentscale;
 
 			float dot_product = glm::dot(rot, otherrot);
 			if (dot_product < 0.0)
@@ -345,6 +390,10 @@ __global__ void preprocessCUDA(int P, int D, int M,
 			}
 			rot = t * rot + (1.0f - t) * otherrot;
 		}
+
+		if (!sky && max(scale.z, max(scale.x, scale.y)) > biglimit)
+			return;
+
 		computeCov3D(scale, scale_modifier, rot, cov3Ds + t_idx * 6);
 		cov3D = cov3Ds + t_idx * 6;
 	}
@@ -407,7 +456,7 @@ __global__ void preprocessCUDA(int P, int D, int M,
 		}
 		else
 		{
-			result = computeColorFromSHInterp(r_idx, p_idx, t_idx, t, D, M, (glm::vec3*)orig_points, cam_pos, shs, clamped_p);
+			result = computeColorFromSHInterp(r_idx, p_idx, t_idx, t, D, M, (glm::vec3*)orig_points, cam_pos, shs, clamped_p, compressed);
 		}
 
 		rgb[t_idx * C + 0] = result.x;
@@ -422,7 +471,15 @@ __global__ void preprocessCUDA(int P, int D, int M,
 	// Inverse 2D covariance and opacity neatly pack into one float4
 	float opacity = opacities[r_idx];
 	if (parent_indices != nullptr)
-		opacity = t * opacity + (1.0f - t) * opacities[p_idx];
+		if(compressed)
+		{
+			d = *((__half2*)&opacity);
+			opacity = t * __half2float(d.x) + (1.0f - t) * __half2float(d.y);
+		}
+		else
+		{
+			opacity = t * opacity + (1.0f - t) * opacities[p_idx];
+		}
 
 #ifdef DGR_FIX_AA
 	conic_opacity[t_idx] = { conic.x, conic.y, conic.z, opacity * h_convolution_scaling };
@@ -643,7 +700,9 @@ void FORWARD::preprocess(int P, int D, int M,
 	float3 boxmin,
 	float3 boxmax,
 	int skyboxnum,
-	cudaStream_t stream)
+	cudaStream_t stream,
+	bool compressed,
+	float biglimit)
 {
 	MatMat viewview, projproj;
 	for (int i = 0; i < 16; i++)
@@ -685,6 +744,8 @@ void FORWARD::preprocess(int P, int D, int M,
 		rects,
 		boxmin,
 		boxmax,
-		skyboxnum
+		skyboxnum,
+		compressed,
+		biglimit
 		);
 }
