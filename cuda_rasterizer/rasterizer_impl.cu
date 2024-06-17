@@ -233,7 +233,6 @@ int CudaRasterizer::Rasterizer::forward(
 	int skyboxnum,
 	void* streamy,
 	int* num_rendered,
-	bool compressed,
 	float biglimit)
 {
 	cudaStream_t stream = (cudaStream_t)streamy;
@@ -306,7 +305,6 @@ int CudaRasterizer::Rasterizer::forward(
 		maxx,
 		skyboxnum,
 		stream,
-		compressed,
 		biglimit
 	), debug);
 

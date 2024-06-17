@@ -63,7 +63,6 @@ namespace CudaRasterizer
 			int skyboxnum = 0,
 			void* stream = 0,
 			int* num_rendered = nullptr,
-			bool compressed = false,
 			float biglimit = FLT_MAX);
 
 		static void backward(

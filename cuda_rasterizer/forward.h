@@ -55,7 +55,6 @@ namespace FORWARD
 		float3 boxmax,
 		int skyboxnum,
 		cudaStream_t stream,
-		bool compressed,
 		float biglimit);
 
 	// Main rasterization method.
